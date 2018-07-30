@@ -1,0 +1,397 @@
+<?php
+
+/**
+ * @file
+ * Integrates various PointCheckout payment services and Instant Payment Notifications
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function uc_pointcheckout_menu() {
+  // Always accessible, helps for testing while site is offline.
+  $items['uc_pointcheckout/success'] = array(
+    'title' => 'PointCheckout verify',
+    'page callback' => 'uc_pointcheckout_success',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_pointcheckout.pages.inc',
+  );
+  $items['uc_pointcheckout/cancel'] = array(
+    'title' => 'PointCheckout cancel',
+    'page callback' => 'uc_pointcheckout_cancel',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_pointcheckout.pages.inc',
+  );
+
+  $items['cart/echeckout/submit'] = array(
+    'title' => 'Submit order',
+    'page callback' => 'uc_pointcheckout_ec_submit',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+    'file' => 'uc_pointcheckout.pages.inc',
+  );
+
+  return $items;
+}
+
+
+
+/**
+ * Implements hook_uc_payment_gateway().
+ */
+function uc_pointcheckout_uc_payment_gateway() {
+  $gateways['pointcheckout_pay'] = array(
+    'title' => t('PointCheckout Pay'),
+    'description' => t('Process payments using PointCheckout Website.'),
+    'settings' => 'uc_pointcheckout_settings_form',
+  );
+
+  return $gateways;
+}
+
+/**
+ * Implements hook_uc_payment_method().
+ */
+function uc_pointcheckout_uc_payment_method() {
+  $title1 = '<img src="https://www.pointcheckout.com/image/logo.png" alt="PointCheckout" width="200px" class="uc-credit-cctype" />'
+         . ' ' . t('PointCheckout - pay with reward points.');
+  $title2 = '<br /><span id="pointcheckout-includes">' . t('pay for your cart using reward points, you will redirected to pointcheckout website to complete payment');
+
+  $methods[] = array(
+    'id' => 'pointcheckout_pay',
+    'name' => t('PointCheckout Website Payments '),
+    'title' => $title1 . $title2,
+    'review' => t('PointCheckout'),
+    'desc' => t('Redirect users to submit payments through PointCheckout.'),
+    'callback' => 'uc_payment_method_pointcheckout',
+    'redirect' => 'uc_pointcheckout_wps_form',
+    'weight' => 1,
+    'checkout' => FALSE,
+    'no_gateway' => TRUE,
+  );
+  return $methods;
+}
+
+/**
+ * Returns the form elements for the Website Payments Standard form.
+ */
+function uc_pointcheckout_wps_form($form, &$form_state, $order) {
+  drupal_add_css(drupal_get_path('module', 'uc_cart') . '/uc_cart.css');
+  $items= _uc_pointcheckout_product_details($order->products);
+  //calculating totals
+  
+  $shipping = 0;
+  if (is_array($order->line_items)) {
+      foreach ($order->line_items as $item) {
+          if ($item['type'] == 'shipping') {
+              $shipping += $item['amount'];
+          }
+      }
+  }
+  $shipping = uc_currency_format($shipping, FALSE, FALSE, '.');
+  
+  $discount = 0;
+  if (is_array($order->line_items)) {
+      foreach ($order->line_items as $item) {
+          if ($item['type'] == 'discount') {
+              $discount += $item['amount'];
+          }
+      }
+  }
+  $discount = uc_currency_format($discount, FALSE, FALSE, '.');
+  
+  $tax = 0;
+  if (module_exists('uc_taxes')) {
+      foreach (uc_taxes_calculate($order) as $tax_item) {
+          $tax += $tax_item->amount;
+      }
+  }
+  $tax = uc_currency_format($tax, FALSE, FALSE, '.');
+  
+  $grandtotal = uc_currency_format($order->order_total, FALSE, FALSE, '.');
+  $subtotal = $grandtotal - $tax - $shipping;
+  
+  $country = uc_get_country_data(array('country_id' => $order->billing_country));
+  if ($country === FALSE) {
+      $country = array(0 => array('country_iso_code_2' => 'US'));
+  }
+  $storeOrder = array();
+  $storeOrder['referenceId'] = $order->order_id;
+  $storeOrder['items'] = array_values($items);
+  $storeOrder['subtotal'] = $subtotal;
+  $storeOrder['shipping'] = $shipping;
+  $storeOrder['tax'] = $tax;
+  $storeOrder['discount'] =  $discount;
+  $storeOrder['grandtotal'] = $grandtotal;
+  $storeOrder['currency'] = $order->currency;
+  
+            //prepare customer Information
+            $customer = array();
+            $user = user_load($order->uid);
+            $customer['firstname'] = $user->name;
+            $customer['lastname'] = "";
+            $customer['email'] = $user->mail;
+            $customer['phone'] = "";
+                
+            $billingAddress = array();
+            $billingAddress['name'] = substr($order->billing_first_name, 0, 25).substr($order->billing_last_name, 0, 25);
+            $billingAddress['address1'] = substr($order->billing_street1, 0, 100);
+            $billingAddress['address2'] = substr($order->billing_street2, 0, 100);
+            $billingAddress['city'] = substr($order->billing_city, 0, 40);
+            $billingAddress['state'] = uc_get_zone_code($order->billing_zone);
+            $billingAddress['country'] = $order->billing_country;
+                
+            $shippingAddress = array();
+            $shippingAddress['name'] = substr($order->delivery_first_name . ' ' . $order->delivery_last_name, 0, 32);
+            $shippingAddress['address1'] =substr($order->delivery_street1, 0, 100);
+            $shippingAddress['address2'] =substr($order->delivery_street2, 0, 100);
+            $shippingAddress['city'] = substr($order->delivery_city, 0, 40);
+            $shippingAddress['state'] = uc_get_zone_code($order->delivery_zone);
+            $shippingAddress['country'] = $order->delivery_country;
+                
+            $customer['billingAddress'] = $billingAddress;
+            $customer['shippingAddress'] = $shippingAddress;
+                
+            $storeOrder['customer'] = $customer;
+            $storeOrder = json_encode($storeOrder);
+            $_BASE_URL= getPointCheckoutApiUrl();
+            $headers = array(
+                'Content-Type: application/json',
+                'Api-Key:'.variable_get('uc_pointcheckout_api_key', ''),
+                'Api-Secret:'.variable_get('uc_pointcheckout_api_secret', ''),
+            );
+            $curl = curl_init($_BASE_URL);
+            curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+            curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+            curl_setopt($curl, CURLOPT_POSTFIELDS, $storeOrder);
+            //sending request
+            $response = curl_exec($curl);
+            file_put_contents("/Applications/XAMPP/xamppfiles/htdocs/magento2/var/log/yaser3.log", date("Y-m-d h:i:sa") .'the response is &&&&&&&&########'.$response."\r\n",FILE_APPEND);
+            //close connection
+            curl_close($curl);
+            
+            //alert error if response is failure
+            if (!$response) {
+                watchdog('uc_pointcheckout', 'Error Connecting to PointCheckout - Please Try again later', WATCHDOG_ERROR);
+                uc_order_update_status($order->order_id,'canceled');
+                drupal_set_message(t('something went wrong .. order canceled .'),'warning');
+                drupal_goto('cart');
+            }else{
+                $response_info = json_decode($response);
+                //prepare response to pointcheckout payment 
+                if (isset($response_info->success) && ($response_info->success == 'true')) {
+                    $message = '';
+                    if (isset($response_info->result)) {
+                        $resultData = $response_info->result;
+                        file_put_contents("/Applications/XAMPP/xamppfiles/htdocs/magento2/var/log/yaser3.log", date("Y-m-d h:i:sa") .'checkout key is '.$resultData->checkoutKey."\r\n",FILE_APPEND);
+                        uc_order_update_status($order->order_id,'pointcheckout_pending');
+                    }else{
+                    watchdog('uc_pointcheckout', 'Error Connecting to PointCheckout - Please Try again later', WATCHDOG_ERROR);
+                    uc_order_update_status($order->order_id,'canceled');
+                    drupal_set_message(t('something went wrong .. order canceled .'),'warning');
+                    drupal_goto('cart');
+                   }
+                }else{
+                    watchdog('uc_pointcheckout', 'Error Connecting to PointCheckout - Please Try again later error: @error', array('@error' => isset($response_info->error)?$response_info->error:'unknown error'), WATCHDOG_ERROR);
+                    uc_order_update_status($order->order_id,'canceled');
+                    drupal_set_message(t('something went wrong .. order canceled .'),'warning');
+                    drupal_goto('cart');
+                }
+         }
+  //build display form if pointcheckout successfully responde to paymet data preparing 
+  $address = variable_get('uc_paypal_wps_address_selection', 'billing');
+  $phone = '';
+  for ($i = 0; $i < strlen($order->{$address . '_phone'}); $i++) {
+    if (is_numeric($order->{$address . '_phone'}[$i])) {
+      $phone .= $order->{$address . '_phone'}[$i];
+    }
+  }
+
+  /**
+   * night_phone_a: The area code for U.S. phone numbers, or the country code
+   *                for phone numbers outside the U.S.
+   * night_phone_b: The three-digit prefix for U.S. phone numbers, or the
+   *                entire phone number for phone numbers outside the U.S.,
+   *                excluding country code.
+   * night_phone_c: The four-digit phone number for U.S. phone numbers.
+   *                (Not Used for UK numbers)
+   */
+  if ($country[0]['country_iso_code_2'] == 'US' || $country[0]['country_iso_code_2'] == 'CA') {
+    $phone = substr($phone, -10);
+    $phone_a = substr($phone, 0, 3);
+    $phone_b = substr($phone, 3, 3);
+    $phone_c = substr($phone, 6, 4);
+  }
+  else {
+    $phone_a = $phone_b = $phone_c = '';
+  }
+
+  $data = array(
+    // Transaction information.
+    'currency_code' => $order->currency,
+    'handling_cart' => $shipping,
+    'invoice' => $order->order_id . '-' . uc_cart_get_id(),
+    'tax_cart' => $tax,
+
+    // Shopping cart specific variables.
+    // Prepopulating forms/address overriding.
+    'address1' => substr($order->{$address . '_street1'}, 0, 100),
+    'address2' => substr($order->{$address . '_street2'}, 0, 100),
+    'city' => substr($order->{$address . '_city'}, 0, 40),
+    'country' => $country[0]['country_iso_code_2'],
+    'email' => $order->primary_email,
+    'first_name' => substr($order->{$address . '_first_name'}, 0, 32),
+    'last_name' => substr($order->{$address . '_last_name'}, 0, 64),
+    'state' => uc_get_zone_code($order->{$address . '_zone'}),
+    'zip' => $order->{$address . '_postal_code'},
+    'night_phone_a' => $phone_a,
+    'night_phone_b' => $phone_b,
+    'night_phone_c' => $phone_c,
+  );
+  if ($discount != 0) {
+      $data['discount_amount_cart'] = $discount;
+  }
+  $form['#action'] = getPointCheckoutCheckoutUrl().$resultData->checkoutKey;
+  $form['#method'] ='get';
+  foreach ($data as $name => $value) {
+    if (!empty($value)) {
+      $form[$name] = array('#type' => 'hidden', '#value' => $value);
+    }
+  }
+  $form['actions'] = array('#type' => 'actions');
+  $form['actions']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Proceed to PointCheckout'),
+  );
+  return $form;
+}
+      
+    
+   
+/**
+ * Settings for Website Payment.
+ */
+function uc_pointcheckout_wpp_settings_form($form, &$form_state) {
+  $order = NULL;
+  $form = uc_payment_method_pointcheckout('settings', $order);
+  unset($form['ec']);
+  return $form;
+}
+
+
+
+/**
+ * Handles payment method.
+ */
+function uc_payment_method_pointcheckout($op, &$order) {
+  switch ($op) {
+    case 'order-view':
+      $checkout_id = db_query("SELECT checkout_id FROM {uc_payment_pointcheckout_pay} WHERE order_id = :id ORDER BY received ASC", array(':id' => $order->order_id))->fetchField();
+      if (empty($checkout_id)) {
+        $checkout_id = t('Unknown');
+      }
+
+      $build['#markup'] = t('Transaction ID:<br />@checkout_id', array('@checkout_id' => $checkout_id));
+      return $build;
+
+    case 'settings':
+      
+      $form['uc_pointcheckout_env_mode'] = array(
+        '#type' => 'select',
+        '#title' => t('Mode'),
+        '#description' => t('choose the enviroment you want payments to be processed.'),
+        '#options' => getModeOptions(),
+        '#default_value' => variable_get('uc_pointcheckout_env_mode', 'Test'),
+      );
+      $form['uc_pointcheckout_api_key'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Api Key'),
+        '#default_value' => variable_get('uc_pointcheckout_api_key', ''),
+      );
+       $form['uc_pointcheckout_api_secret'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Api Secret'),
+        '#default_value' => variable_get('uc_pointcheckout_api_secret', ''),
+      );
+      return $form;
+  }
+}
+
+/*******************************************************************************
+ * Module and Helper Functions
+ ******************************************************************************/
+
+
+/**
+ * Returns the pointcheckout modes.
+ */
+ function getModeOptions(){
+    $enableStaging = true;
+    if($enableStaging){
+       return array(
+          'staging' => t('Staging'),
+          'live' => t('Live'),
+          'test' => t('Test'));
+    }else{
+      return array(
+          'live' => t('Live'),
+          'test' => t('Test'));
+    }
+    
+ }
+/**
+ * Returns the pointcheckout api url.
+ */
+ function getPointCheckoutApiUrl(){
+    if (variable_get('uc_pointcheckout_env_mode', '') == 'staging'){
+        return 'https://pay.staging.pointcheckout.com/api/v1.0/checkout';
+    }elseif(variable_get('uc_pointcheckout_env_mode', '') == 'live'){
+       return 'https://pay.pointcheckout.com/api/v1.0/checkout';
+    }else{
+       return 'https://pay.test.pointcheckout.com/api/v1.0/checkout';
+    }
+    } 
+
+/**
+ * Returns the pointcheckout checkout url.
+ */
+    function getPointCheckoutCheckoutUrl(){
+    if (variable_get('uc_pointcheckout_env_mode', '') == 'staging'){
+        return 'https://pay.staging.pointcheckout.com/checkout/';
+    }elseif(variable_get('uc_pointcheckout_env_mode', '') == 'live'){
+        return 'https://pay.pointcheckout.com/checkout/';
+    }else{
+        return 'https://pay.test.pointcheckout.com/checkout/';
+    }
+}
+
+
+/**
+ * Returns the description and subtotal of the products on an order.
+ */
+function _uc_pointcheckout_product_details($orderItems) {
+  if (!empty($orderItems)) {
+    $items = array();
+    $i = 0;
+    foreach ($orderItems as $orderItem) {
+                $item = array(
+                    'name'=> $orderItem->title,
+                    'sku' => $orderItem->title,
+                    'quantity' => $orderItem->qty,
+                    'total' => uc_currency_format($orderItem->qty * $orderItem->price, FALSE, FALSE, '.')
+                    );
+                $items[$i++] = $item;
+            }
+  return $items ;
+ }
+ }
+
+
+/**
+ * Returns an array of possible currency codes.
+ */
+function _uc_pointcheckout_currency_array() {
+  return drupal_map_assoc(array('AUD', 'BRL', 'CAD', 'CHF', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'HUF', 'ILS', 'JPY', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'SEK', 'SGD', 'THB', 'TWD', 'USD'));
+}
