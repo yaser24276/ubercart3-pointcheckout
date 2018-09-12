@@ -17,7 +17,6 @@ function uc_pointcheckout_success() {
       watchdog('uc_pointcheckout', 'verify attempted with invalid checkout id.', array(), WATCHDOG_ERROR);
       return;
   }
-  file_put_contents("/Applications/XAMPP/xamppfiles/htdocs/magento2/var/log/yaser3.log", date("Y-m-d h:i:sa") .'hi dod Im here2'."\r\n",FILE_APPEND);
   
     $order_id = intval($_GET['reference']);
 
@@ -43,7 +42,6 @@ function uc_pointcheckout_success() {
    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
    
    $response = curl_exec($ch);
-   file_put_contents("/Applications/XAMPP/xamppfiles/htdocs/magento2/var/log/yaser3.log", date("Y-m-d h:i:sa") .'secound response'.$response ."\r\n",FILE_APPEND);
    
   // Log any errors to the watchdog.
   if ($error = curl_error($ch)) {
@@ -60,8 +58,7 @@ function uc_pointcheckout_success() {
   
   //check response and redirect user to either success or failure page
   if (($response_info->success == 'true' && $response_info->result->status =='PAID')) {
-      $message.= 'PointCheckout ' ;
-      $message.= 'payment status: '.$response_info->result->status;
+      $message.= getPointCheckoutOrderHistoryMessage($response_info->result->checkoutId,$response_info->result->cod,$response_info->result->status,$payment_currency);
       uc_payment_enter($order_id, 'pointcheckout_wps', $payment_amount, $order->uid, NULL, $message);
       uc_cart_complete_sale($order);
       uc_order_comment_save($order_id, 0, t($message));
@@ -79,7 +76,7 @@ function uc_pointcheckout_success() {
       $_SESSION['uc_checkout'][$order_id]['do_complete'] = TRUE;
       drupal_goto('cart/checkout/complete');
   }elseif(!$response_info->success == 'true'){
-      uc_order_comment_save($order_id, 0, t('PointCheckout Payment Failed.'), 'admin');
+      uc_order_comment_save($order_id, 0, t('PointCheckout Payment Failed  error: '.$response_info->error), 'admin');
       watchdog('uc_pointcheckout','[ERROR} PointCheckout response with error payment failed   error msg is :'.$response_info->error);
       uc_order_update_status($order_id,'canceled');
       drupal_set_message(t('payment failed order canceled.'),'error');
@@ -103,7 +100,6 @@ function uc_pointcheckout_cancel() {
         watchdog('uc_pointcheckout', 'cancel attempted with invalid order id.', array(), WATCHDOG_ERROR);
         return;
     }
-    file_put_contents("/Applications/XAMPP/xamppfiles/htdocs/magento2/var/log/yaser3.log", date("Y-m-d h:i:sa") .'hi dod Im here2'."\r\n",FILE_APPEND);
     $order_id = intval($_GET['reference']);
     watchdog('uc_pointcheckout', 'Receiving verify at URL for order @order_id. <pre>@debug</pre>', array('@order_id' => $order_id));
     $order = uc_order_load($order_id);
@@ -111,8 +107,8 @@ function uc_pointcheckout_cancel() {
         watchdog('uc_pointcheckout', 'cancel attempted for non-existent order @order_id.', array('@order_id' => $order_id), WATCHDOG_ERROR);
         return;
     }
-        uc_order_comment_save($order_id, 0, t('PointCheckout Payment Failed.'), 'admin');
-        uc_order_update_status($order_id,'canceled');
+        uc_order_comment_save($order_id, 0, t('user had cancelled the payment'), 'admin');
+        uc_order_update_status($order_id,'canceled');        
         watchdog('uc_pointcheckout','[ERROR} PointCheckout response with error payment failed');
         //unset($_SESSION['cart_order']);
         drupal_set_message(t('order canceled.'),'warning');

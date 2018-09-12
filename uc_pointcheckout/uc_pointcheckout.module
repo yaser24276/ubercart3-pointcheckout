@@ -126,6 +126,10 @@ function uc_pointcheckout_wps_form($form, &$form_state, $order) {
   $storeOrder['discount'] =  $discount;
   $storeOrder['grandtotal'] = $grandtotal;
   $storeOrder['currency'] = $order->currency;
+  global $base_url;
+  $storeOrder['successUrl'] = $base_url.'/uc_pointcheckout/success';
+  $storeOrder['failureUrl'] = $base_url.'/uc_pointcheckout/cancel';
+  
   
             //prepare customer Information
             $customer = array();
@@ -168,7 +172,6 @@ function uc_pointcheckout_wps_form($form, &$form_state, $order) {
             curl_setopt($curl, CURLOPT_POSTFIELDS, $storeOrder);
             //sending request
             $response = curl_exec($curl);
-            file_put_contents("/Applications/XAMPP/xamppfiles/htdocs/magento2/var/log/yaser3.log", date("Y-m-d h:i:sa") .'the response is &&&&&&&&########'.$response."\r\n",FILE_APPEND);
             //close connection
             curl_close($curl);
             
@@ -185,7 +188,8 @@ function uc_pointcheckout_wps_form($form, &$form_state, $order) {
                     $message = '';
                     if (isset($response_info->result)) {
                         $resultData = $response_info->result;
-                        file_put_contents("/Applications/XAMPP/xamppfiles/htdocs/magento2/var/log/yaser3.log", date("Y-m-d h:i:sa") .'checkout key is '.$resultData->checkoutKey."\r\n",FILE_APPEND);
+                        $message.= getPointCheckoutOrderHistoryMessage($resultData->checkoutId,0,$resultData->status,$resultData->currency);
+                        uc_order_comment_save($order->order_id, 0, t($message));  
                         uc_order_update_status($order->order_id,'pointcheckout_pending');
                     }else{
                     watchdog('uc_pointcheckout', 'Error Connecting to PointCheckout - Please Try again later', WATCHDOG_ERROR);
@@ -366,6 +370,28 @@ function uc_payment_method_pointcheckout($op, &$order) {
         return 'https://pay.test.pointcheckout.com/checkout/';
     }
 }
+
+function getPointCheckoutOrderHistoryMessage($checkout,$codAmount,$orderStatus,$currency) {
+        $message = 'PointCheckout Status: <b>'.$orderStatus.'</b><br />PointCheckout Transaction ID: <a href="'.getAdminUrl().'/merchant/transactions/'.$checkout.'/read " target="_blank">'.$checkout.'</a><br/>' ;
+        if($codAmount>0){
+           $message.= '<b>[IMPORTANT_NOTICE] </b>COD Amount: <b>'.$codAmount.' </b>'.$currency.' '."\n";
+        }
+        return $message;
+    }
+    
+    
+   function getAdminUrl(){
+        if (variable_get('uc_pointcheckout_env_mode', '') == 'staging'){
+            $_ADMIN_URL='https://admin.staging.pointcheckout.com';
+        }elseif(variable_get('uc_pointcheckout_env_mode', '') == 'live'){
+            $_ADMIN_URL='https://admin.pointcheckout.com';
+        }else{
+            $_ADMIN_URL='https://admin.test.pointcheckout.com';
+        }
+        return $_ADMIN_URL;
+        
+    }
+    
 
 
 /**
