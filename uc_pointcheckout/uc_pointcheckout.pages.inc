@@ -52,14 +52,14 @@ function uc_pointcheckout_success() {
   curl_close($ch);
   $message = '';
   $response_info = json_decode($response);
-  $payment_amount=$response_info->result->grandtotal;
+  $payment_amount=$response_info->result->grandtotal - $response_info->result->cod ;
   $payment_currency =$response_info->result->currency;
   
   
   //check response and redirect user to either success or failure page
   if (($response_info->success == 'true' && $response_info->result->status =='PAID')) {
       $message.= getPointCheckoutOrderHistoryMessage($response_info->result->checkoutId,$response_info->result->cod,$response_info->result->status,$payment_currency);
-      uc_payment_enter($order_id, 'pointcheckout_wps', $payment_amount, $order->uid, NULL, $message);
+      uc_payment_enter($order_id, 'pointcheckout_wps', $payment_amount, $order->uid, null, $message);
       uc_cart_complete_sale($order);
       uc_order_comment_save($order_id, 0, t($message));
       uc_order_update_status($order_id,'payment_received');
